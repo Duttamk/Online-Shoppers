@@ -1,0 +1,467 @@
+---
+title: "Real Time Prediction Online Shoppers Purchasing Intention"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+
+
+# ABSTRACT
+
+
+
+
+# INTRODUCTION
+
+The dataset in question has been collected from the open repository of University of California Irvine (UCI). It contains 12,330 rows and 18 columns. Each row represents a session of online shopping and the columns represent attributes of each session (like - transaction amount, time spent, etc.).
+
+
+
+
+## ATTRIBUTE INFORMATION
+
+Of all the attributes, 10 are numerical and 8 are categorical. The *Revenue* attribute represents whether a transaction was finalized (TRUE) or not (FALSE).
+
+The attributes: *Administrative*, *Administrative_Duration*, *Informational*, *Informational_Duration*, *Product Related* and *ProductRelated-Duration* represent the number of different types of pages visited by the visitor in that session and total time spent (in seconds) in each of these page categories.
+
+*BounceRates*, *ExitRates* and *PageValues* represent the "Google Analytics" metric. The *SpecialDay* column represents the closeness of the day of transaction to a specific special day (like - Valentines' Day, New Year, etc.). Its values changes for each special day, but ranges from 0 to 1 with "1" being the closest.
+
+*Month*, *Region*, *TrafficType* and *VisitorType* re all categorical features indicating the month of visit, geographical region of the visitor, traffic source of the visitor and whether the person is "returning", "new" or "other" visitor.
+
+
+
+# OBJECTIVE AND APPROACH
+
+Classify 30% of the dataset (test data) for the target variable "revenue". Apply Support Vector Machine (SVM) and Random Forest (RF) algorithms for the classifications.
+
+First, introduce *NAs* at random positions in the data through the *prodNA* function from *missForest* package. 
+
+Standardize the numerical columns of the data through Z-score method. Apply Factor Analysis of Mixed Data (FAMD) through the *FAMD* function from *FactoMineR* package. FAMD performs Principal Component Analysis (PCA) of numerical variables and Multiple Correspondence Analysis (MCA) of categorical values, and hence it is favored for mixed datasets. Analyze the FAMD results to select predictors that account for >85% variance in the data.
+
+Using *svm* function from *e1071* package, train the training set to predict for test set. Train *randomForest* function from the package of same name over the training data with unscaled features. Plot both the models and evaluate the SVM and RF models with Cohen's kappa (k) value.
+
+Perform *kmeans* clustering analysis of the dataset using to view groups within the data.
+
+
+
+# EXISTING RESEARCH
+
+
+This dataset has been part of researches, specifically in this [paper](https://doi.org/10.1007/s00521-018-3523-0). Here, they used the LIBSVM implementation with optimized hyperparameter values. Decision tree from C4.5 algorithm and LSTM-RNN were also utilized.
+
+
+
+# METHOD
+
+
+## SETUP
+
+```{r Packages, message=FALSE, warning=FALSE, include=FALSE}
+
+r <- getOption("repos")
+r["CRAN"] <- "https://cloud.r-project.org/"
+options(repos = r)
+
+
+if(!require(FactoMineR)){
+  install.packages(c("FactoMineR"), quiet = TRUE)
+}
+
+if(!require(factoextra)){
+  install.packages(c("factoextra"), quiet = TRUE)
+}
+
+if(!require(dplyr)){
+  install.packages("dplyr", quiet =TRUE)
+}
+
+
+if(!require(missForest)){
+  install.packages("missForest", quiet = TRUE)
+}
+
+if(!require(outliers)){
+  install.packages("outliers")
+}
+
+if(!require(Hmisc)){
+  install.packages("Hmisc", quiet = TRUE)
+}
+
+if(!require(mice)){
+  install.packages("mice", quiet = TRUE)
+}
+
+
+if(!require(e1071)){
+  install.packages("e1071", quiet = TRUE)
+}
+
+
+if(!require(superml) & !require(devtools)){
+ install.packages("devtools", quiet = TRUE)
+devtools::install_github("saraswatmks/superml", quiet = TRUE) 
+}
+
+if(!require(psych)){
+ install.packages("psych", quiet = TRUE) 
+}
+
+if(!require(randomForest)){
+  install.packages("randomForest", quiet = TRUE)
+}
+
+if(!require(gmodels)){
+  install.packages("gmodels", quiet = TRUE)
+}
+
+library("FactoMineR", quietly = TRUE)
+library("factoextra", quietly = TRUE)
+library(dplyr, quietly = TRUE)
+library(missForest, quietly = TRUE)
+library(outliers)
+library(Hmisc, quietly = TRUE)
+library(mice, quietly = TRUE)
+library(e1071, quietly = TRUE)
+library(superml, quietly = TRUE)
+library(psych, quietly = TRUE)
+library(randomForest, quietly = TRUE)
+library(gmodels, quietly = TRUE)
+```
+
+
+
+```{r Loading Data Set}
+
+# Reading the csv file from url into a dataframe
+shop <- read.csv("https://archive.ics.uci.edu/ml/machine-learning-databases/00468/online_shoppers_intention.csv")
+```
+
+
+```{r Understanding Dataset}
+
+# Changing column names for convenience
+colnames(shop) <- c("Admin", "Admin_time", "Info", "Info_time", "Prod", "Prod_time", "Bounce", "Exit",
+                    "Page_value", "Special_day", "Month", "OS", "Browser", "Region", "Traffic_type",
+                    "Visitor_type", "Weekend", "Revenue")
+
+# Explore dataframe
+glimpse(shop)
+
+```
+As we can see, the columns from *Admin* to *Special_day* are continuous in nature, and the others are categorical. Of the categorical columns, *OS* *Browser*, *Region* and *Traffic_type* are label_encoded without any order.
+
+
+
+```{r Introduce Missing Values}
+
+# Apply the prodNA function to introduce random missing values in dataset
+shop_na <- prodNA(shop, noNA = 0.001)
+
+```
+
+
+
+## IMPUTATING NAs
+
+
+```{r Imputing Numerical Columns}
+
+# Examine the data distribution for each columns
+summary(shop_na)
+hist.data.frame(shop_na[1:10], na.big = TRUE, rugs = TRUE)
+
+# Imputing NAs through the Predictive Mean Matching method using the mice function
+set.seed(1001)
+imp <- mice(shop_na[1:10], method = "pmm", m=1)
+shop_na[1:10] <- complete(imp)
+
+# Check the distribution of data
+hist.data.frame(shop_na, na.big = TRUE, rugs = TRUE)
+summary(shop_na)
+```
+The Stochastic Regression was able to substitute NAs in numerical columns. For the categorical variables, mode of the variable would be used to substitue the NAs.
+
+
+
+```{r Imputing Categorical Columns}
+
+# Mode of a column
+getmode <- function(x) {
+   uniq <- unique(x)
+   uniq[which.max(tabulate(match(x, uniq)))]
+}
+
+
+# Applying getmode function for each categorical variable
+mode.shop <- lapply(shop_na[11:18], getmode)
+mode.shop <- as.data.frame(unclass(mode.shop))
+
+# Imputing NAs from respective columns
+shop_imp <- shop_na
+for(i in 11:18){
+  num.row <- which(is.na(shop_na[i]))
+  shop_imp[num.row,i] <- mode.shop[i-10]
+}
+
+summary(shop_imp)
+```
+
+
+```{r Outliers}
+
+# Colinearity of continous variables with target column
+pairs.panels(cbind(shop_imp[1:10], shop_imp$Revenue))
+
+# Outlier detection for continuous variables
+hist.data.frame(shop_imp[1:10])
+
+# Grubbs outlier test
+grubbs.test(shop_imp$Exit, opposite = TRUE)
+```
+Some of the columns like *Prod* and *Prod_time* show high correlation suggesting a collinearity between them. But we will employ PCA(MCA for categorical variables) for feature selection.
+
+The columns *Exit* seems to have an outlier. But the outlier test does not report enough confidence to state that. So, we will continue to use the dataset as it is for further analysis.
+
+
+## STANDARDIZATION
+
+
+```{r Standardization}
+
+# Apply z-score method to the numerical columns
+num_var <- scale(shop_imp[1:10])
+
+# Stitching the standardized numerical columns with the categorical ones
+shop_norm <- cbind(num_var, shop_imp[11:18])
+
+summary(shop_norm)
+
+```
+
+
+## FACTOR ANALYSIS OF MIXED DATA
+
+```{r FAMD}
+
+# Applying FAMD function to perform PCA and MCA of numerical and categorical columns, respectively
+# On standardized dataset
+res.famd_norm <- FAMD(shop_norm, ncp = 10, graph = FALSE)
+print(res.famd_norm)
+
+# Screeplot for percentages of inertia explained by each dimensions
+fviz_screeplot(res.famd_norm)
+```
+The screeplot suggests the use of first 6 dimensions. The rest of the components do not account for substantial increase in the variance. Al
+
+
+```{r Interpreting FAMD,warning=FALSE}
+
+# Get the quality of representation and the contributions of each dimension
+var <- get_famd_var(res.famd_norm)
+ind <- get_famd_ind(res.famd_norm)
+
+# Plot of variables
+fviz_famd_var(res.famd_norm, repel = TRUE)
+
+# Contribution of variables to first 6 dimension
+fviz_contrib(res.famd_norm, "var", axes = 1)
+fviz_contrib(res.famd_norm, "var", axes = 2)
+fviz_contrib(res.famd_norm, "var", axes = 3)
+fviz_contrib(res.famd_norm, "var", axes = 4)
+fviz_contrib(res.famd_norm, "var", axes = 5)
+fviz_contrib(res.famd_norm, "var", axes = 6)
+
+# Plot individuals by label
+fviz_ellipses(res.famd_norm, c("Bounce", "Visitor_type"), repel = TRUE)
+
+```
+
+Interpreting the contributions of variables to first 6 dimensions, we would progress with the following columns as the predictors for the SVM analysis: 
+
+*Prod*, *Prod_time*, *Admin*, *Info*, *Bounce*, *Exit*, *Page_value*, *Visitor_type*, *OS*, *Month* and *Special_day*.
+
+The last two dimensions might be heavily affected by the individual variances in the depicted variables. Also, choosing both *Prod* and *Prod_time* as predictors might introduce some redundancy in the models since the features have shown high correlation.
+
+
+## SVM
+
+
+```{r Data Prep SVM}
+
+# Subset relevant columns for SVM
+shop.svm <- shop_norm[ ,c("Prod", "Prod_time", "Admin", "Info", "Bounce", "Exit", "Page_value",
+                         "Visitor_type", "OS", "Month", "Special_day", "Revenue")]
+
+# Convert factors character columns to numericals
+shop.svm$Visitor_type <- ifelse(shop.svm$Visitor_type == "Other", 0,
+                                ifelse(shop.svm$Visitor_type == "New_Visitor", 1,2))
+shop.svm$Revenue <- ifelse(shop.svm$Revenue == TRUE, 1,0)
+
+# Encode month labels
+lbl <- LabelEncoder$new()
+lbl$fit(shop.svm$Month)
+shop.svm$Month <- lbl$fit_transform(shop.svm$Month)
+
+
+# 70%/30% split into training and testing set
+shop.svm_train <- shop.svm[1:8631,]
+shop.svm_test <- shop.svm[8632:12330,]
+```
+
+
+
+
+```{r Support Vector Machine}
+
+# Apply svm function with linear kernel
+model.svm <- svm(Revenue ~ ., shop.svm_train, kernel = "linear")
+model.svm
+
+# Apply svm function with radial basis kernel
+model.svm_rbf <- svm(Revenue ~ ., shop.svm_train, kernel = "radial")
+model.svm_rbf
+```
+
+
+```{r SVM Predictions}
+
+# Predicting for test set
+# Linear kernel model
+pred.svm <- predict(model.svm, shop.svm_test[-12], )
+pred.svm <- ifelse(pred.svm > 0.5, 1,0)
+
+# Non-linear kernel model
+pred.svm_rbf <- predict(model.svm_rbf, shop.svm_test[-12])
+pred.svm_rbf <- ifelse(pred.svm_rbf > 0.5, 1,0)
+```
+
+
+
+### LINEAR AND NON-LINEAR SVM KERNEL
+
+
+```{r SVM Evaluation}
+
+# Cohen's kappa value and confusion matrix for linear SVM
+cohen.kappa(cbind(shop.svm_test$Revenue, pred.svm))
+CrossTable(shop.svm_test$Revenue, pred.svm)
+
+# Cohen's kappa value and confusion matrix for non-linear SVM
+cohen.kappa(cbind(shop.svm_test$Revenue, pred.svm_rbf))
+CrossTable(shop.svm_test$Revenue, pred.svm_rbf)
+```
+
+The linear kernel gives an accuracy of 83%, with a precision and recall of 76% and 24%, respectively.
+The kappa value is 0.3.
+
+The non-linear RBF kernel produces an accuracy of 85%, with precision and recall of 76% and 32%, respectively.
+The kappa value is 0.37.
+
+
+
+
+## RANDOM FOREST
+
+
+
+```{r RF}
+
+# Splitting the non-standardized dataset into training and testing set
+shop.rf_train <- shop_imp[1:8631,]
+shop.rf_test <- shop_imp[8632:12330,]
+
+# Train the RF
+model.rf <- randomForest(Revenue ~ ., shop.rf_train)
+
+# Predict for test set
+pred.rf <- predict(model.rf, shop.rf_test[-18], type = "response")
+pred.rf <- ifelse(pred.rf>0.5, 1,0)
+```
+
+
+```{r RF Evaluation}
+
+# Confusion matrix for RF
+CrossTable(shop.rf_test$Revenue, pred.rf)
+
+# Cohen's kappa value for RF
+cohen.kappa(cbind(shop.rf_test$Revenue, pred.rf))
+```
+The default Random Forest algorithm has produced accuracy of 85%, with precision and recall of 80% and 35%, respectively. The kappa value is 0.41.
+
+
+
+## CLUSTERING
+
+
+```{r kMeans Clustering}
+
+# Copying the svm dataset as it is devoid of characters and normalized
+shop.cl <- shop.svm
+
+# Dissmilarity matrix for standardized data
+d <- dist(shop.cl, method = "manhattan")
+
+# Applying the kmeans function
+model.cl <- kmeans(shop.cl, centers = 2, algorithm = c("Forgy"), iter.max = 20)
+model.cl$centers
+
+# Plotting clusters
+fviz_cluster(model.cl, shop.cl[, -12], palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = "point", ellipse = TRUE, ellipse.type = "convex", ggtheme = theme_bw())
+
+```
+The kmeans algorithm has differentiated two clusters. 
+The first cluster represents the visitors who:
+
+1. Spend the least time on product pages(*Prod* and *Prod_time*)
+2. Tend to exit the current webpage they are on (*Bounce* and *Exit*)
+3. Tend to visit the webpage around special days (*Special_day*)
+4. Consume only on the basis of the timing (*Month*)
+
+The second cluster represents visitors who visit the pages all the time, irrespective of the date or special day, tend to stay more on product pages and also spend around two times the cluster 1 representatives.
+
+We can say that the *cluster 2* visitors are the regular shoppers, while *cluster 1* visitors can be termed as **Special Day Shoppers**.
+
+
+
+
+## ENSEMBLE MODEL
+
+
+Since, among SVM the non-linear RBF has higher recall and kappa value, I have chosen to use RBF SVM and RF algorithms for the ensemble method.
+
+```{r Building Model}
+
+# SVM features
+ft.svm <- c("Prod", "Prod_time", "Admin", "Info", "Bounce", "Exit", "Page_vale", 
+            "Visitor_type", "OS", "Month", "Special_day")
+            
+# Function for ensemble model
+ensmbl <- function(x){
+  
+  p1 <- predict(model.svm_rbf, x[, ft.svm], type = "response")
+  p1 <- ifelse(p1>0.5, 1,0)
+  
+  p2 <- predict(model.rf, x, type = "response")
+  p2 <- ifelse(p2>0.5, 1,0)
+  
+  result <- ifelse(p2 == 1, 1,
+                   ifelse(p1 == 1, 1,0))
+  
+  return(result)
+}
+```
+
+This ensemble model favors *TRUE* or *1* classification of RF model over any other.
+
+When the RF classifies the sample as *FALSE* or *2*, it checks for RBF SVM's results, which if *TRUE* or *1* would lead to final classification of *TRUE* or *1*, else otherwise.
+
+The idea is that it is better to misclassify non-buyer shoppers as potential buyers, that to misclassify potential buyers as non-buyers. Hence, a *False Positive* is more welcomed that *False Negative*
+
+
+
+
