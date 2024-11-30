@@ -42,4 +42,4 @@ This dataset has been part of researches, specifically in this [paper](https://d
 
 # OUTPUTS
 
-The output along with the code can be viewed on the site : https://duttamk.github.io/Online-Shoppers/index.html
+The output along with the code can be viewed on the site : https://duttamk.github.io/Online-Shoppers/
