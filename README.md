@@ -38,3 +38,8 @@ Perform *kmeans* clustering analysis of the dataset using to view groups within 
 
 
 This dataset has been part of researches, specifically in this [paper](https://doi.org/10.1007/s00521-018-3523-0). Here, they used the LIBSVM implementation with optimized hyperparameter values. Decision tree from C4.5 algorithm and LSTM-RNN were also utilized.
+
+
+# OUTPUTS
+
+The output along with the code can be viewed on the site : https://duttamk.github.io/Online-Shoppers/index.html
